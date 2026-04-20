@@ -4,83 +4,74 @@
 // Purpose
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// Demonstrate the Automate Friday DSL end-to-end in one file, with real AI
-// agents (Haiku via `claude -p`) collaborating on a workflow through a
-// shared fact log.
+// Automate Friday with just TWO primitives: auto.skill and auto.agent.
 //
-// The primitives exercised:
-//   auto.skill      — declarative unit of work (optionally approval-gated)
-//   auto.role       — attestation that a subject holds a role
-//   auto.agent      — capability provider: advertises which skills it provides
-//   auto.engine     — reactive policy that observes the log and dispatches
-//   auto.workflow   — sensor-triggered composition of skills
-//   auto.sequential — chain steps; later steps see earlier outputs
+// Everything else is expressed as skills or agents:
+//   • A workflow is a composite skill (SKILL.md with a `steps:` block)
+//   • A role is a skill that only certain agents provide (e.g. `approve-*`)
+//   • A tool is a deterministic skill (a `script` agent provides it)
+//   • An engine is an agent that subscribes to the log
 //
-// The core value propositions this shows:
-//   1. Declarative progressive automation
-//      The same skill can be fulfilled by a human, an AI, or a script.
-//      Trust graduation = reducer rule that relaxes approval requirements.
-//   2. Decentralized collaboration
-//      No participant calls another. They collaborate by appending facts
-//      to a shared log and projecting views. Swap the in-memory log for a
-//      socket/Convex/Git repo and this runs across machines.
+// The framework's unique value is the opinionated orchestrator: it reads
+// rules from skill frontmatter and enforces them deterministically —
+// waiting on approvals, chaining sub-skills, refusing ineligible claims,
+// logging every decision for audit.
 //
 // Run: bun examples/youtube-to-discord.ts
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 1. FactLog — the substrate
+// 1. FactLog — append-only substrate. In production this could be Git,
+//     Convex, Postgres, or S3. The framework doesn't own it.
 // ═══════════════════════════════════════════════════════════════════════════
 
 type Fact = { id: string; lamport: number; signer: string; payload: any };
 
 const log: Fact[] = [];
-const factSubscribers: Array<(f: Fact) => void> = [];
+const subscribers: Array<(f: Fact) => void | Promise<void>> = [];
 let nextLamport = 1;
 
 function append(signer: string, payload: any): Fact {
   const fact: Fact = { id: `f${log.length + 1}`, lamport: nextLamport++, signer, payload };
   log.push(fact);
-  for (const cb of factSubscribers) queueMicrotask(() => cb(fact));
+  for (const cb of subscribers) queueMicrotask(() => cb(fact));
   return fact;
 }
-function subscribe(cb: (f: Fact) => void) { factSubscribers.push(cb); }
+function subscribe(cb: (f: Fact) => void | Promise<void>) { subscribers.push(cb); }
+function find(kind: string, dispatchId: string) {
+  return log.find(f => f.payload.kind === kind && f.payload.dispatchId === dispatchId);
+}
+function has(kind: string, dispatchId: string) { return !!find(kind, dispatchId); }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 2. DSL — auto.*
+// 2. Two primitives — auto.skill and auto.agent.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const registered = {
-  skills:    new Map<string, any>(),
-  agents:    new Map<string, any>(),
-  workflows: new Map<string, any>(),
-  engines:   new Map<string, any>(),
+type SkillSpec = {
+  description?: string;
+  trigger?: string;                                // sensor event that fires this skill
+  requires_approval?: string;                      // approval skill that gates this dispatch
+  steps?: Array<{ skill: string; as?: string; with?: (ctx: any) => any }>;  // composite
 };
+
+type AgentSpec = {
+  kind: "human" | "ai" | "script";
+  provides: string[];
+  run: (payload: any) => Promise<any>;
+};
+
+const skills = new Map<string, SkillSpec & { id: string }>();
+const agents = new Map<string, AgentSpec & { id: string }>();
 
 const auto = {
-  skill(id: string, spec: { description?: string; requires_approval?: string; requires?: string[] } = {}) {
-    registered.skills.set(id, { id, ...spec });
+  skill(id: string, spec: SkillSpec = {}) {
+    skills.set(id, { id, ...spec });
     append("system", { kind: "SkillRegistered", skillId: id, ...spec });
-    return { _kind: "skill" as const, id, ...spec };
   },
-  role(subject: string, role: string) {
-    append("system", { kind: "RoleAttested", subject, role });
-  },
-  agent(id: string, spec: { kind: "human" | "ai" | "script"; provides: string[]; run: (payload: any) => Promise<any> }) {
-    registered.agents.set(id, { id, ...spec });
+  agent(id: string, spec: AgentSpec) {
+    agents.set(id, { id, ...spec });
     append(id, { kind: "AgentOffered", agentId: id, agentKind: spec.kind, skills: spec.provides });
   },
-  engine(id: string, spec: { watches: string; run: (fact: Fact) => void | Promise<void> }) {
-    registered.engines.set(id, { id, ...spec });
-  },
-  workflow(id: string, spec: { on: string; steps: any }) {
-    registered.workflows.set(id, { id, ...spec });
-  },
-  sequential(...steps: any[]) { return { _kind: "sequential" as const, steps }; },
 };
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 3. Runtime — dispatch lifecycle driven by log subscription
-// ═══════════════════════════════════════════════════════════════════════════
 
 function dispatch(from: string, skillId: string, payload: any): string {
   const dispatchId = `d${log.length + 1}`;
@@ -88,72 +79,118 @@ function dispatch(from: string, skillId: string, payload: any): string {
   return dispatchId;
 }
 
-// Engine: RBAC approver — when a dispatch needs approval and the required
-// role is attested on some engine with an auto-approve policy, approve.
-auto.engine("rbac-approver", {
-  watches: "DispatchProposed",
-  run: (fact) => {
-    const skill = registered.skills.get(fact.payload.skillId);
-    if (!skill?.requires_approval) return;
-    // find who holds the required role (projection)
-    const holders = log
-      .filter(f => f.payload.kind === "RoleAttested" && f.payload.role === skill.requires_approval)
-      .map(f => f.payload.subject);
-    // auto-approve from the first holder (toy: real system would wait for human)
-    if (holders.length > 0) {
-      append(holders[0], { kind: "DispatchApproved", dispatchId: fact.payload.dispatchId });
-    }
-  },
-});
+// ═══════════════════════════════════════════════════════════════════════════
+// 3. Governance orchestrator — the framework's unique value.
+//     Reads rules from skill frontmatter, enforces them deterministically.
+// ═══════════════════════════════════════════════════════════════════════════
 
-// Engine: dispatcher — once a dispatch is claimable (no approval pending),
-// pick the best agent (script > ai > human), invoke, and record the result.
-auto.engine("dispatcher", {
-  watches: "DispatchProposed|DispatchApproved",
-  run: async (fact) => {
-    // which dispatch is now eligible?
-    let dispatchId: string;
-    if (fact.payload.kind === "DispatchProposed") {
-      const skill = registered.skills.get(fact.payload.skillId);
-      if (skill?.requires_approval) return; // wait for approval
-      dispatchId = fact.payload.dispatchId;
-    } else {
-      dispatchId = fact.payload.dispatchId;
-    }
-
-    const proposed = log.find(f => f.payload.kind === "DispatchProposed" && f.payload.dispatchId === dispatchId);
-    if (!proposed) return;
-    const already = log.some(f => f.payload.kind === "DispatchClaimed" && f.payload.dispatchId === dispatchId);
-    if (already) return;
-    const skill = registered.skills.get(proposed.payload.skillId);
-
-    const rank: Record<string, number> = { script: 3, ai: 2, human: 1 };
-    const eligible = [...registered.agents.values()]
-      .filter(a => a.provides.includes(proposed.payload.skillId))
-      .sort((a, b) => rank[b.kind] - rank[a.kind]);
-
-    if (eligible.length === 0) {
-      append("dispatcher", { kind: "DispatchBlocked", dispatchId, reason: "no eligible agent" });
-      return;
-    }
-    const chosen = eligible[0];
-    append(chosen.id, { kind: "DispatchClaimed", dispatchId, byAgent: chosen.id });
-    try {
-      const result = await chosen.run(proposed.payload.payload);
-      append(chosen.id, { kind: "DispatchConfirmed", dispatchId, result });
-    } catch (err) {
-      append(chosen.id, { kind: "DispatchBlocked", dispatchId, reason: String(err) });
-    }
-  },
-});
-
-// wire engine subscriptions
+// Rule A: trigger — when a sensor fires, any skill declaring that trigger dispatches.
 subscribe((fact) => {
-  for (const engine of registered.engines.values()) {
-    const kinds = engine.watches.split("|");
-    if (kinds.includes(fact.payload.kind)) engine.run(fact);
+  if (fact.payload.kind !== "SensorEmitted") return;
+  for (const skill of skills.values()) {
+    if (skill.trigger === fact.payload.sensorId) {
+      dispatch("sensor-trigger", skill.id, fact.payload.reading);
+    }
   }
 });
+
+// Rule B: approval — if a skill requires_approval (which is itself a skill),
+// dispatch the approval skill and wait. When it confirms, append DispatchApproved.
+subscribe(async (fact) => {
+  if (fact.payload.kind !== "DispatchProposed") return;
+  const skill = skills.get(fact.payload.skillId);
+  if (!skill?.requires_approval) return;
+  if (has("DispatchApproved", fact.payload.dispatchId)) return;
+  const parentId = fact.payload.dispatchId;
+  // dispatch approval skill exactly once
+  const existingApproval = log.find(f =>
+    f.payload.kind === "DispatchProposed"
+    && f.payload.skillId === skill.requires_approval
+    && f.payload.payload?.__forDispatch === parentId
+  );
+  if (existingApproval) return;
+  dispatch("governance", skill.requires_approval, { __forDispatch: parentId });
+});
+
+// Rule C: approval confirmation — when an approval skill confirms, append
+// DispatchApproved for the parent dispatch.
+subscribe((fact) => {
+  if (fact.payload.kind !== "DispatchConfirmed") return;
+  const proposed = find("DispatchProposed", fact.payload.dispatchId);
+  const forDispatch = proposed?.payload.payload?.__forDispatch;
+  if (!forDispatch) return;
+  if (has("DispatchApproved", forDispatch)) return;
+  append(fact.signer, { kind: "DispatchApproved", dispatchId: forDispatch });
+});
+
+// Rule D: main dispatcher — claim, run, confirm. Handles composite skills
+// (with `steps:`) by orchestrating sub-dispatches directly.
+subscribe(async (fact) => {
+  let dispatchId: string | null = null;
+  if (fact.payload.kind === "DispatchProposed") {
+    const skill = skills.get(fact.payload.skillId);
+    if (skill?.requires_approval) return;  // wait for Rule B+C to approve
+    dispatchId = fact.payload.dispatchId;
+  } else if (fact.payload.kind === "DispatchApproved") {
+    dispatchId = fact.payload.dispatchId;
+  }
+  if (!dispatchId) return;
+  if (has("DispatchClaimed", dispatchId)) return;  // don't double-claim
+
+  const proposed = find("DispatchProposed", dispatchId);
+  if (!proposed) return;
+  const skillId = proposed.payload.skillId;
+  const skill = skills.get(skillId);
+  const input = proposed.payload.payload;
+
+  // Composite skill → orchestrate directly (no agent involved)
+  if (skill?.steps) {
+    append("orchestrator", { kind: "DispatchClaimed", dispatchId, byAgent: "orchestrator" });
+    const ctx: any = { ...input };
+    try {
+      for (const step of skill.steps) {
+        const subPayload = step.with ? step.with(ctx) : ctx;
+        const subId = dispatch("orchestrator", step.skill, subPayload);
+        const result = await awaitDispatchResult(subId);
+        if (result.__blocked) throw new Error(`sub-dispatch blocked: ${result.reason}`);
+        if (step.as) ctx[step.as] = result;
+      }
+      append("orchestrator", { kind: "DispatchConfirmed", dispatchId, result: ctx });
+    } catch (err) {
+      append("orchestrator", { kind: "DispatchBlocked", dispatchId, reason: String(err) });
+    }
+    return;
+  }
+
+  // Leaf skill → find an agent, prefer script > ai > human
+  const rank: Record<string, number> = { script: 3, ai: 2, human: 1 };
+  const eligible = [...agents.values()]
+    .filter(a => a.provides.includes(skillId))
+    .sort((a, b) => rank[b.kind] - rank[a.kind]);
+  if (eligible.length === 0) {
+    append("orchestrator", { kind: "DispatchBlocked", dispatchId, reason: "no eligible agent" });
+    return;
+  }
+  const chosen = eligible[0];
+  append(chosen.id, { kind: "DispatchClaimed", dispatchId, byAgent: chosen.id });
+  try {
+    const result = await chosen.run(input);
+    append(chosen.id, { kind: "DispatchConfirmed", dispatchId, result });
+  } catch (err) {
+    append(chosen.id, { kind: "DispatchBlocked", dispatchId, reason: String(err) });
+  }
+});
+
+function awaitDispatchResult(dispatchId: string): Promise<any> {
+  return new Promise((resolve) => {
+    const cb = (f: Fact) => {
+      if (f.payload.dispatchId !== dispatchId) return;
+      if (f.payload.kind === "DispatchConfirmed") resolve(f.payload.result);
+      else if (f.payload.kind === "DispatchBlocked") resolve({ __blocked: true, reason: f.payload.reason });
+    };
+    subscribers.push(cb);
+  });
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 4. Haiku via `claude -p` — no API key required
@@ -167,29 +204,37 @@ async function callHaiku(prompt: string): Promise<string> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 5. Scenario — YouTube → Discord with approval gate
+// 5. Scenario — four skills, three agents. No workflow/role/engine primitives.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// roles — who holds authority over what
-auto.role("jacob-laptop", "owner");
-
-// skills — abstract capabilities that describe work to be done
 auto.skill("summarize-video", {
-  description: "Generate a concise summary of a YouTube video",
-});
-auto.skill("post-to-discord", {
-  description: "Post a message to a Discord channel",
-  requires_approval: "owner", // progressive automation: gated until trust graduates
+  description: "Generate a one-sentence teaser for a YouTube video.",
 });
 
-// agents — each provides one or more skills. HOW they fulfill is internal.
+auto.skill("post-to-discord", {
+  description: "Post a message to a Discord channel.",
+  requires_approval: "approve-post-to-discord",
+});
+
+auto.skill("approve-post-to-discord", {
+  description: "Approve a post-to-discord dispatch. Only agents with 'owner' authority provide this.",
+});
+
+auto.skill("youtube-to-discord", {
+  description: "When a video is published, summarize and post to Discord.",
+  trigger: "youtube",
+  steps: [
+    { skill: "summarize-video", as: "summary" },
+    { skill: "post-to-discord", with: (ctx: any) => ({ channel: "releases", content: `🎬 ${ctx.summary?.summary ?? ctx.summary}` }) },
+  ],
+});
+
 auto.agent("claude-summarizer", {
   kind: "ai",
   provides: ["summarize-video"],
   run: async (payload) => {
-    const prompt = `You are writing a one-sentence teaser for a new video given ONLY its title. Do not ask for more info. Infer a plausible angle from the title and write an engaging single sentence. Title: "${payload.title}". Return ONLY the sentence.`;
-    const summary = await callHaiku(prompt);
-    return { summary, emoji: "🎬" };
+    const prompt = `Write a one-sentence teaser for a new video given ONLY its title. Do not ask for more info. Title: "${payload.title}". Return ONLY the sentence.`;
+    return { summary: await callHaiku(prompt) };
   },
 });
 
@@ -197,52 +242,29 @@ auto.agent("discord-poster", {
   kind: "script",
   provides: ["post-to-discord"],
   run: async (payload) => {
-    // toy: would POST to Discord webhook in production
     console.log(`\n    📨 [Discord] #${payload.channel}: ${payload.content}\n`);
     return { messageId: `mock-${Date.now()}`, postedAt: new Date().toISOString() };
   },
 });
 
-// workflow — declares the chain; compiled to engine that dispatches sequentially
-auto.workflow("youtube-to-discord", {
-  on: "youtube",
-  steps: auto.sequential(
-    { _kind: "step", skill: "summarize-video", as: "summary" },
-    { _kind: "step", skill: "post-to-discord", as: "posted" },
-  ),
-});
-
-// compile the workflow into an orchestrator engine
-auto.engine("youtube-to-discord-orchestrator", {
-  watches: "SensorEmitted|DispatchConfirmed",
-  run: (fact) => {
-    if (fact.payload.kind === "SensorEmitted" && fact.payload.sensorId === "youtube") {
-      dispatch("youtube-to-discord-orchestrator", "summarize-video", fact.payload.reading);
-      return;
-    }
-    if (fact.payload.kind === "DispatchConfirmed") {
-      const proposed = log.find(f => f.payload.kind === "DispatchProposed" && f.payload.dispatchId === fact.payload.dispatchId);
-      if (proposed?.payload.skillId === "summarize-video") {
-        const video = log.find(f => f.payload.kind === "SensorEmitted" && f.payload.sensorId === "youtube")!.payload.reading;
-        const { summary, emoji } = fact.payload.result;
-        dispatch("youtube-to-discord-orchestrator", "post-to-discord", {
-          channel: "releases",
-          content: `${emoji} New video: ${video.title} — ${summary}`,
-        });
-      }
-    }
+// Collapsed "owner role" = an agent that provides approve-* skills.
+auto.agent("jacob-laptop", {
+  kind: "human",
+  provides: ["approve-post-to-discord"],
+  run: async () => {
+    await new Promise(r => setTimeout(r, 20));  // toy: simulate human click
+    return { approved: true };
   },
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 6. Pretty log tail — watch the collaboration live
+// 6. Pretty log tail
 // ═══════════════════════════════════════════════════════════════════════════
 
 const EMOJI: Record<string, string> = {
-  SkillRegistered: "📘", RoleAttested: "📜",
-  AgentOffered: "🤝", SensorEmitted: "🎥", DispatchProposed: "📮",
-  DispatchApproved: "✅", DispatchClaimed: "🙋", DispatchConfirmed: "🟢",
-  DispatchBlocked: "🔒",
+  SkillRegistered: "📘", AgentOffered: "🤝", SensorEmitted: "🎥",
+  DispatchProposed: "📮", DispatchApproved: "✅", DispatchClaimed: "🙋",
+  DispatchConfirmed: "🟢", DispatchBlocked: "🔒",
 };
 subscribe((fact) => {
   const emoji = EMOJI[fact.payload.kind] ?? "•";
@@ -250,21 +272,18 @@ subscribe((fact) => {
   const detail = fact.payload.skillId ? `skill=${fact.payload.skillId}` :
                  fact.payload.dispatchId ? `id=${fact.payload.dispatchId}` :
                  fact.payload.sensorId ? `sensor=${fact.payload.sensorId}` :
-                 fact.payload.role ? `role=${fact.payload.role}` :
                  fact.payload.agentId ? `agent=${fact.payload.agentId}` : "";
-  console.log(`  [L${String(fact.lamport).padStart(3)}] ${fact.signer.padEnd(28)} ${emoji} ${tag.padEnd(20)} ${detail}`);
+  console.log(`  [L${String(fact.lamport).padStart(3)}] ${fact.signer.padEnd(22)} ${emoji} ${tag.padEnd(20)} ${detail}`);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 7. Run — simulate a YouTube video being published
+// 7. Run — a YouTube video is published
 // ═══════════════════════════════════════════════════════════════════════════
 
-console.log("\n── Automate Friday DSL toy: YouTube → Discord ──\n");
-console.log("Scenario: a video is published. The summarize-video skill runs (AI, no");
-console.log("approval). post-to-discord requires owner approval — progressive");
-console.log("automation gate that would relax once the discord-poster has a track record.\n");
+console.log("\n── Automate Friday: two primitives (skill + agent) ──");
+console.log("4 skills declared, 3 agents provide. No workflow/role/engine.\n");
 
-await new Promise(r => setTimeout(r, 50)); // let bootstrap facts flush
+await new Promise(r => setTimeout(r, 50));
 
 append("youtube-bridge", {
   kind: "SensorEmitted",
@@ -272,7 +291,6 @@ append("youtube-bridge", {
   reading: { videoId: "abc123", title: "Building an agent coordination protocol", publishedAt: new Date().toISOString() },
 });
 
-// wait for the async chain to settle
 await new Promise(r => setTimeout(r, 60_000));
 
 console.log(`\n── Done. ${log.length} facts in the log. ──`);
