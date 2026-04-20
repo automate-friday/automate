@@ -28,6 +28,67 @@ Because skills are declarative and executor-agnostic:
 
 If everything else in the DSL disappeared, you could still have a system of skills as plain markdown files that humans do manually. The rest of the framework is the machinery that lets the same skill scale from "human reads a doc and does it" to "AI handles it unattended" without the skill definition changing.
 
+## Strict superset of the Agent Skills standard
+
+Automate Friday's skill format is a **strict superset** of the [Agent Skills open standard](https://agentskills.io) — the SKILL.md format adopted by Claude Code, Cursor, Copilot, Gemini CLI, Aider, and 30+ other tools. The relationship is analogous to TypeScript / JavaScript: every valid SKILL.md is a valid Automate Friday skill, and Automate Friday skills add optional metadata that the base standard doesn't have, namespaced so tools that don't understand the extras safely ignore them.
+
+### What the base standard defines
+
+| Element | Purpose |
+|---|---|
+| `SKILL.md` | The skill artifact (required) |
+| `name`, `description` (frontmatter) | Required fields per spec |
+| `scripts/` | Executable code the agent can run |
+| `references/` | Docs loaded on demand |
+| `assets/` | Static resources, schemas, data files |
+
+### What Automate Friday adds, namespaced
+
+All Automate Friday-specific fields live inside an `automate-friday:` block in YAML frontmatter. Readers that don't know about it treat it as an unknown key and skip it — same way an HTML parser skips unknown attributes.
+
+```yaml
+---
+name: post-to-discord
+description: Post a message to a Discord channel.
+
+automate-friday:
+  requires_approval: owner         # gate: only dispatches approved by an owner can proceed
+  requires_toolbox: content-tools  # gate: only agents holding content-tools can fulfill
+  provides:                        # what this skill produces (for workflow composition)
+    - messageId: string
+    - postedAt: iso8601
+  depends_on:                      # other skills this one composes with
+    - validate-channel
+---
+```
+
+### Why namespacing matters
+
+The earlier design draft proposed a separate `skill.ts` file alongside `SKILL.md`. A spec-maintainer review cut that approach apart: two files = two formats = two-tier ecosystem = fractures the standard. The namespaced frontmatter extension avoids that entirely:
+
+- One file, one format, always.
+- Vanilla readers (Claude Code, Cursor, etc.) see a valid SKILL.md — name, description, process — and run it.
+- Automate Friday readers see the `automate-friday` block additionally and wire in approval gates, toolbox checks, workflow composition.
+- No "this tool supports Automate Friday skills, this one doesn't." Every tool gets a working skill; some get more.
+
+### How a "full skill" plugs into the system
+
+A skill folder in an Automate Friday project looks identical to a standard Agent Skills folder — because it is one:
+
+```
+skills/
+  post-to-discord/
+    SKILL.md          ← the skill (with optional automate-friday block)
+    scripts/
+      post.ts         ← optional executable
+    references/
+      discord-api.md  ← optional docs
+```
+
+The framework watches the `skills/` directory, reads each `SKILL.md`, and registers it by appending a `SkillRegistered` fact to the log. Any `automate-friday` block fields flow through into the fact. Agents and engines subscribe and react. The skill is live.
+
+The same SKILL.md, copied into another party's repo, is a valid skill there too. If both parties run Automate Friday, the namespaced fields transfer. If one party uses a vanilla Agent Skills tool, they still get a working skill — minus the gates. That's the superset property in practice: graceful degradation, never fracture.
+
 ---
 
 ## The current DSL

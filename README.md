@@ -17,6 +17,8 @@ You end up with two bad options: don't use AI, or hand it the keys.
 
 **Skills are the base primitive.** A skill is a declarative description of work that needs to happen — written in plain language with structured metadata, no code required. A skill does not know who will do it, when, or how. It just names the work and describes it.
 
+A skill in Automate Friday is a **`SKILL.md` file** — the same format used by the [Agent Skills open standard](https://agentskills.io) adopted by Claude Code, Cursor, Copilot, Gemini CLI, Aider, and 30+ other tools. Automate Friday is a **strict superset** of that standard. Any valid SKILL.md works here as-is; Automate Friday adds optional namespaced fields that unlock approval gates, toolboxes, and workflow composition. Tools that don't know Automate Friday safely ignore those fields — the skill still runs.
+
 Everything else in the framework exists in service of skills: agents fulfill them, roles gate their approval, toolboxes scope what's authorized, engines dispatch them, workflows compose them, control flow orders them.
 
 Because skills are declarative and executor-agnostic, the same skill can be done by different fulfillers as trust grows:
@@ -52,6 +54,52 @@ This is **progressive automation**. It is the product.
 - **Teams** that need multi-party approval workflows (procurement, customer refunds, deploys) and don't want to rebuild when they add AI.
 - **Agencies and consultants** whose clients want to collaborate with their AI systems on shared workflows — without handing over credentials or building one-off integrations.
 - **Builders** who see the future as human + AI + scripts collaborating on real business, not yet another chatbot.
+
+## What a skill looks like
+
+A vanilla SKILL.md — works in every Agent Skills-compatible tool:
+
+```markdown
+---
+name: post-to-discord
+description: Post a message to a specified Discord channel.
+---
+
+# Post to Discord
+
+Given a channel name and a message body, post it to Discord.
+
+## Inputs
+- `channel` — the channel to post to (e.g. `#releases`)
+- `content` — the message body (markdown supported)
+
+## Process
+1. Validate the channel exists and you have permission
+2. POST to the Discord webhook
+3. Return the posted message id
+
+## Output
+- `messageId` — the Discord message id
+- `postedAt` — ISO timestamp
+```
+
+Same skill with Automate Friday extensions — still a valid SKILL.md; other tools ignore the `automate-friday` block:
+
+```markdown
+---
+name: post-to-discord
+description: Post a message to a specified Discord channel.
+
+automate-friday:
+  requires_approval: owner
+  requires_toolbox: content-tools
+---
+
+# Post to Discord
+...
+```
+
+That's it. One block of namespaced fields. A human reading the skill still understands it. Claude Code or Cursor still reads it. Automate Friday additionally wires in the approval gate and toolbox check.
 
 ## What a workflow looks like
 
