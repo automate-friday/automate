@@ -1,36 +1,117 @@
-# Automate Friday — Framework
+# Automate Friday
 
-> The declarative DSL, runtime, and reference implementations for the Automate Friday agent coordination protocol.
-
-**License:** FSL-1.1-Apache-2.0 (Functional Source License, converts to Apache 2.0 on 2028-04-19)
-**Author:** Jacob Haugen
-**Status:** Early scaffolding with one working example. See [`docs/key-ideas.md`](docs/key-ideas.md) for the seven-primitive DSL vocabulary (ruthlessly cut to serve declarative progressive automation + decentralized collaboration). See [`examples/youtube-to-discord.ts`](examples/youtube-to-discord.ts) for a runnable ~200-LOC example exercising the full DSL with live Haiku agents via `claude -p`.
+> **Automate your business so you can take Friday off.**
+> A framework for real AI automation — where the same skill can be done by a human today, an AI tomorrow, and a script next month, with approval workflows and audit built in.
 
 ---
 
-## What this repo is
+## The problem
 
-This is the framework layer — the ergonomic DSL, the runtime that compiles DSL declarations into fact-log operations, and reference implementations of common agents (Claude-backed, script-backed, human interface).
+AI agents can do real work. You just can't trust them to always do it right.
 
-If you want the underlying protocol specification and the minimal reference prototypes, see the companion repository:
+So automation today is a cliff — either a human does it, or an AI does it, or a script does it. Moving between those states means rebuilding the integration from scratch. You can't ease into AI. You can't let Claude handle customer replies "with approval for anything over $100." You can't start with a human doing 100% of a task and incrementally hand it off.
 
-**Protocol:** [automate-friday/protocol](https://github.com/automate-friday/protocol) — MIT-licensed. White paper, fact schemas, minimal reference prototypes.
+You end up with two bad options: don't use AI, or hand it the keys.
 
-## Why FSL and not MIT
+## The idea
 
-The protocol is MIT — free for all uses forever, because standards benefit from maximum adoption.
+**The same skill, done by different fulfillers as trust grows.**
 
-The framework is FSL — free for personal, internal, and non-competing commercial use; prohibits hosted SaaS offerings that compete with the author's own hosted service during a 2-year protection window, after which the entire framework converts automatically to Apache 2.0.
+```
+Skill: "reply to customer support ticket"
 
-Same approach as HashiCorp's Terraform (BSL), Sentry, and similar indie-founder-friendly licensing.
+  Today:    a human on your team does it
+  Month 2:  Claude drafts, human approves, sends
+  Month 6:  Claude handles tickets under $50, routes the rest to humans
+  Year 1:   a script handles deterministic cases; Claude handles the rest; humans handle appeals
+```
 
-## Planned structure
+The skill definition never changes. What changes is who fulfills it — and that shifts silently as track record accumulates.
 
-- `dsl/` — declarative composition (`auto.skill`, `auto.agent`, `auto.engine`, `auto.workflow`, `auto.sequential`, `auto.parallel`)
-- `runtime/` — log transport adapters, scheduler, subscription manager
-- `examples/` — YouTube→Discord, Etsy management, incident response (canonical demos)
-- `docs/` — architecture notes, migration guides
+This is **progressive automation**. It is the product.
+
+## What you get
+
+1. **A declarative DSL for workflows.** Describe what work exists (skills), who can do it (agents), who approves (roles), what capabilities they're authorized for (toolboxes). Compose skills into workflows with control flow between steps.
+
+2. **Trust that graduates.** The approval gate on a skill is a simple rule. Once an agent has proven itself — say, 100 successful ticket replies, zero escalations — that rule relaxes automatically. No rebuild. The audit log proves why.
+
+3. **Agents as first-class peers.** Humans, AI agents (Claude, local models), and deterministic scripts all participate through the same interface. Swap one for another without touching the workflow.
+
+4. **Collaboration across machines and organizations.** Your agent on your laptop and your client's agent on their VPS can work on the same task. They coordinate through a shared log — no integration project, no bespoke API.
+
+5. **Audit for free.** Every action is a signed entry in the log. "Why did this refund go out at 3pm?" is answerable by dumping the log. Compliance, debugging, and replay are all projections over the same data.
+
+## Who this is for
+
+- **Indie founders** who want AI to take over more of their operations as confidence grows, without betting the business on day one.
+- **Teams** that need multi-party approval workflows (procurement, customer refunds, deploys) and don't want to rebuild when they add AI.
+- **Agencies and consultants** whose clients want to collaborate with their AI systems on shared workflows — without handing over credentials or building one-off integrations.
+- **Builders** who see the future as human + AI + scripts collaborating on real business, not yet another chatbot.
+
+## What a workflow looks like
+
+```typescript
+// A real YouTube → Discord workflow, ~200 LOC end-to-end
+
+auto.toolbox('content-tools', { tools: ['fetch-transcript', 'call-llm', 'post-webhook'] })
+
+auto.skill('summarize-video',  { requires_toolbox: 'content-tools' })
+auto.skill('post-to-discord',  { requires_toolbox: 'content-tools', requires_approval: 'owner' })
+
+auto.agent('claude-summarizer', { kind: 'ai',     fulfills: ['summarize-video'], /* Haiku */ })
+auto.agent('discord-poster',    { kind: 'script', fulfills: ['post-to-discord'], /* webhook */ })
+
+auto.workflow('youtube-to-discord', {
+  on: 'youtube',
+  steps: auto.sequential(
+    { skill: 'summarize-video' },
+    { skill: 'post-to-discord' },
+  ),
+})
+```
+
+Run that with `bun examples/youtube-to-discord.ts`. You'll see live fact-log output as the AI agent summarizes and the script agent posts — with the `post-to-discord` step pausing for approval until the owner greenlights it. Remove the approval requirement, and it runs autonomously. Add a new agent kind, it joins immediately.
+
+No servers to configure. No webhook plumbing. No bespoke integration code.
+
+## Seven primitives, nothing else
+
+Automate Friday's DSL is deliberately tiny:
+
+```
+auto.skill      — declare a unit of work, with optional approval/capability gates
+auto.role       — attest that someone holds authority
+auto.toolbox    — bundle tools into a named capability set
+auto.agent      — advertise that you can fulfill certain skills
+auto.engine     — react to facts and dispatch work
+auto.workflow   — compose skills, triggered by a sensor
+auto.sequential — chain steps in order
+```
+
+Everything else — queues, retries, approvals, audit, replay, multi-party coordination, progressive automation — falls out of how these seven compose over a shared log. See [`docs/key-ideas.md`](docs/key-ideas.md) for the full explanation.
 
 ## Status
 
-Nothing is implemented yet. This repository exists to reserve the namespace, establish the license, and provide a target for incoming work. Follow the [protocol repo](https://github.com/automate-friday/protocol) for current state.
+- **Working today:** the seven-primitive DSL, the reactive runtime, and the YouTube → Discord example with live Haiku agents.
+- **In progress:** more examples (Etsy store, incident response, BDB workflows), persistent log transports (Convex, Postgres, Git-as-log), additional agent kinds.
+- **Open source:** yes. See the [protocol repo](https://github.com/automate-friday/protocol) for the underlying substrate.
+
+## Get started
+
+```bash
+git clone https://github.com/automate-friday/automate
+cd automate
+bun examples/youtube-to-discord.ts
+```
+
+You'll need [Bun](https://bun.sh) and the Claude Code CLI installed. No API keys required — Haiku is invoked through the local `claude` command.
+
+## Related
+
+- **[automate-friday/protocol](https://github.com/automate-friday/protocol)** — the open protocol spec and minimal reference prototypes. MIT-licensed. Read this if you want to implement a new runtime or transport.
+- **[Why this matters](https://github.com/automate-friday/protocol/blob/main/WHITE-PAPER.md#why-this-matters)** — the longer argument for progressive automation and decentralized collaboration.
+
+## License
+
+Free for personal, internal, and non-competing commercial use. Converts fully to Apache 2.0 in April 2028. See [LICENSE](LICENSE) for specifics.
