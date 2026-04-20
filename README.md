@@ -75,21 +75,28 @@ Run that with `bun examples/youtube-to-discord.ts`. You'll see live fact-log out
 
 No servers to configure. No webhook plumbing. No bespoke integration code.
 
-## Seven primitives, nothing else
+## The DSL
 
-Automate Friday's DSL is deliberately tiny:
+Automate Friday's DSL stays as small as it can while covering real workflows. The current primitives:
 
 ```
-auto.skill      — declare a unit of work, with optional approval/capability gates
-auto.role       — attest that someone holds authority
-auto.toolbox    — bundle tools into a named capability set
-auto.agent      — advertise that you can fulfill certain skills
-auto.engine     — react to facts and dispatch work
-auto.workflow   — compose skills, triggered by a sensor
-auto.sequential — chain steps in order
+auto.skill       — declare a unit of work, with optional approval/capability gates
+auto.role        — attest that someone holds authority
+auto.toolbox     — bundle tools into a named capability set
+auto.agent       — advertise that you can fulfill certain skills
+auto.engine      — react to facts and dispatch work
+auto.workflow    — compose skills, triggered by a sensor
+
+Control flow between steps:
+auto.sequential  — chain steps in order; later steps see earlier outputs
+auto.parallel    — fan out; all steps run concurrently
+auto.for         — iterate over a collection; one dispatch per item
+auto.switch      — conditional branch based on projected state
 ```
 
-Everything else — queues, retries, approvals, audit, replay, multi-party coordination, progressive automation — falls out of how these seven compose over a shared log. See [`docs/key-ideas.md`](docs/key-ideas.md) for the full explanation.
+Queues, retries, approvals, audit, replay, multi-party coordination, and progressive automation all fall out of how these primitives compose over a shared fact log — they aren't separate subsystems. See [`docs/key-ideas.md`](docs/key-ideas.md) for how each primitive earns its place.
+
+The DSL is actively evolving. New primitives land when a real workflow we care about needs them; we don't add surface speculatively. If you hit something awkward in your workflow, that's likely a framework bug, not a usage issue — open an issue.
 
 ## Status
 

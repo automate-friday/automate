@@ -16,9 +16,11 @@ Everything else in the framework is secondary to, and in service of, these two.
 
 ---
 
-## The seven DSL primitives
+## The current DSL
 
-These are the only primitives the DSL exposes. They compile to fact-log operations. They serve one or both core values.
+These are the primitives the DSL exposes today. Each compiles to fact-log operations and serves one or both core values. The DSL will grow — new primitives land when a real workflow needs them, not speculatively.
+
+### Declarations
 
 ```typescript
 auto.skill(id, {
@@ -34,7 +36,7 @@ auto.toolbox(id, {
 })
 
 auto.agent(id, {
-  kind: 'human' | 'ai' | 'script',  // selection policy prefers script > ai > human
+  kind: 'human' | 'ai' | 'script',  // selection prefers script > ai > human
   fulfills: skillId[],
   toolbox?: toolboxId,              // what this agent is authorized for
   run: (payload) => Promise<any>,   // fulfillment function
@@ -47,27 +49,20 @@ auto.engine(id, {
 
 auto.workflow(id, {
   on: sensorId,                     // trigger
-  steps,                            // composition
+  steps,                            // composition (see control flow below)
 })
-
-auto.sequential(...steps)           // chain steps; later sees earlier
-auto.parallel(...steps)             // fan out (optional stretch)
 ```
 
-That's the entire vocabulary.
+### Control flow between steps
 
-## Cut from earlier iterations
+```typescript
+auto.sequential(...steps)                   // chain steps; later sees earlier
+auto.parallel(...steps)                     // fan out; all run concurrently
+auto.for(collection, body)                  // iterate; one dispatch per item
+auto.switch(value, { case1: body1, ... })   // conditional branch
+```
 
-Preserved mentally; dropped from the public DSL surface because they didn't earn their place against the two core values:
-
-- `auto.for`, `auto.switch` — control flow beyond sequential/parallel (add back if a real workflow needs them)
-- `auto.checkpoint`, `auto.transaction` — persistence concerns that belong in the runtime, not the DSL
-- `auto.module` — filesystem resolution; the DSL should be declarative, not filesystem-coupled
-- 12 relationship words from the earlier `auto.system` DSL (`watches`, `gates`, `escalates`, `supervises`, `overrides`, `spawns`, `owns`, `monitors`, `publishes`, `depends_on`, `signals`, `context`) — collapse into reducer rules in the fact log
-- Chassis supervision tree (Erlang/OTP-style) — overkill for reactive loops; replaced by a single log subscription
-- Four-primitive vision (Skills / Agents / Tools / Tasks) — Tools are subsumed by Toolboxes; Tasks are subsumed by sensors + DispatchProposed facts
-
-## Why these particular primitives
+### Why these particular primitives
 
 | Primitive | Serves progressive automation | Serves decentralized collaboration |
 |---|---|---|
@@ -75,9 +70,21 @@ Preserved mentally; dropped from the public DSL surface because they didn't earn
 | `auto.role` | Defines WHO can approve | Cross-party trust via attestations |
 | `auto.toolbox` | Scopes what a fulfiller can touch | Capability-based authorization across parties |
 | `auto.agent` | The graduating entity | Self-advertised capability in the log |
-| `auto.engine` | Reactive policies (including trust-graduation rules) | Run independently on any node; react via log subscription |
+| `auto.engine` | Reactive policies (including trust-graduation rules) | Runs on any node; reacts via log subscription |
 | `auto.workflow` | Declarative composition | Shared workflow definition anyone can project |
-| `auto.sequential` | Control flow between steps | Deterministic chain across fulfillers |
+| `auto.sequential` / `parallel` / `for` / `switch` | Control flow between steps | Deterministic composition across fulfillers |
+
+## What stays out (for now)
+
+Dropped from earlier iterations, or deferred until a real workflow demands them:
+
+- `auto.checkpoint`, `auto.transaction` — persistence concerns belong in the runtime, not the DSL
+- `auto.module` — filesystem resolution; the DSL should be declarative, not filesystem-coupled
+- 12 relationship words from the earlier `auto.system` DSL (`watches`, `gates`, `escalates`, `supervises`, `overrides`, `spawns`, `owns`, `monitors`, `publishes`, `depends_on`, `signals`, `context`) — most of these collapse into reducer rules in the fact log
+- Chassis supervision tree (Erlang/OTP-style) — overkill for reactive loops; replaced by a single log subscription
+- Four-primitive vision (Skills / Agents / Tools / Tasks) — Tools are subsumed by Toolboxes; Tasks are subsumed by sensors + DispatchProposed facts
+
+These can come back if we hit a workflow that genuinely needs them. The DSL is an iterative artifact, not a frozen spec.
 
 ## Governance toolboxes — a new concept
 
@@ -111,7 +118,7 @@ The DSL is porcelain. The fact log is plumbing. See the `automate-friday/protoco
 
 ## Example
 
-See `examples/youtube-to-discord.ts` for a runnable 200-LOC example exercising all seven primitives with live Haiku-backed agents via `claude -p`. It demonstrates:
+See `examples/youtube-to-discord.ts` for a runnable 200-LOC example exercising the core primitives with live Haiku-backed agents via `claude -p`. It demonstrates:
 
 - A skill with a toolbox gate (`summarize-video` requires `content-tools`)
 - A skill with an approval gate (`post-to-discord` requires `owner` role)
