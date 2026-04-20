@@ -17,9 +17,9 @@ You end up with two bad options: don't use AI, or hand it the keys.
 
 **Skills are the base primitive.** A skill is a declarative description of work that needs to happen — written in plain language with structured metadata, no code required. A skill does not know who will do it, when, or how. It just names the work and describes it.
 
-A skill in Automate Friday is a **`SKILL.md` file** — the same format used by the [Agent Skills open standard](https://agentskills.io) adopted by Claude Code, Cursor, Copilot, Gemini CLI, Aider, and 30+ other tools. Automate Friday is a **strict superset** of that standard. Any valid SKILL.md works here as-is; Automate Friday adds optional namespaced fields that unlock approval gates, toolboxes, and workflow composition. Tools that don't know Automate Friday safely ignore those fields — the skill still runs.
+A skill in Automate Friday is a **`SKILL.md` file** — the same format used by the [Agent Skills open standard](https://agentskills.io) adopted by Claude Code, Cursor, Copilot, Gemini CLI, Aider, and 30+ other tools. Automate Friday is a **strict superset** of that standard. Any valid SKILL.md works here as-is; Automate Friday adds optional namespaced fields that unlock approval gates and composition. Tools that don't know Automate Friday safely ignore those fields — the skill still runs.
 
-Everything else in the framework exists in service of skills: agents fulfill them, roles gate their approval, toolboxes scope what's authorized, engines dispatch them, workflows compose them, control flow orders them.
+Everything else in the framework exists in service of skills: agents provide them, roles gate their approval, engines dispatch them, workflows compose them, control flow orders them.
 
 Because skills are declarative and executor-agnostic, the same skill can be done by different fulfillers as trust grows:
 
@@ -32,13 +32,13 @@ Skill: "reply to customer support ticket"
   Year 1:   a script handles deterministic cases; Claude handles the rest; humans handle appeals
 ```
 
-The skill definition never changes. What changes is who fulfills it — and that shifts silently as track record accumulates.
+The skill definition never changes. What changes is who provides it — and that shifts silently as track record accumulates.
 
 This is **progressive automation**. It is the product.
 
 ## What you get
 
-1. **A declarative DSL for workflows.** Describe what work exists (skills), who can do it (agents), who approves (roles), what capabilities they're authorized for (toolboxes). Compose skills into workflows with control flow between steps.
+1. **A declarative DSL for workflows.** Describe what work exists (skills), who can do it (agents), who approves (roles). Compose skills into workflows with control flow between steps.
 
 2. **Trust that graduates.** The approval gate on a skill is a simple rule. Once an agent has proven itself — say, 100 successful ticket replies, zero escalations — that rule relaxes automatically. No rebuild. The audit log proves why.
 
@@ -91,28 +91,26 @@ name: post-to-discord
 description: Post a message to a specified Discord channel.
 
 automate-friday:
-  requires_approval: owner
-  requires_toolbox: content-tools
+  requires_approval: owner        # human-in-the-loop until trust graduates
+  requires: [validate-channel]    # sub-capabilities this skill composes
 ---
 
 # Post to Discord
 ...
 ```
 
-That's it. One block of namespaced fields. A human reading the skill still understands it. Claude Code or Cursor still reads it. Automate Friday additionally wires in the approval gate and toolbox check.
+That's it. One block of namespaced fields. A human reading the skill still understands it. Claude Code or Cursor still reads it. Automate Friday additionally wires in the approval gate and composition.
 
 ## What a workflow looks like
 
 ```typescript
 // A real YouTube → Discord workflow, ~200 LOC end-to-end
 
-auto.toolbox('content-tools', { tools: ['fetch-transcript', 'call-llm', 'post-webhook'] })
+auto.skill('summarize-video',  { description: 'Summarize a YouTube video' })
+auto.skill('post-to-discord',  { description: 'Post a message to Discord', requires_approval: 'owner' })
 
-auto.skill('summarize-video',  { requires_toolbox: 'content-tools' })
-auto.skill('post-to-discord',  { requires_toolbox: 'content-tools', requires_approval: 'owner' })
-
-auto.agent('claude-summarizer', { kind: 'ai',     fulfills: ['summarize-video'], /* Haiku */ })
-auto.agent('discord-poster',    { kind: 'script', fulfills: ['post-to-discord'], /* webhook */ })
+auto.agent('claude-summarizer', { kind: 'ai',     provides: ['summarize-video'], /* Haiku */ })
+auto.agent('discord-poster',    { kind: 'script', provides: ['post-to-discord'], /* webhook */ })
 
 auto.workflow('youtube-to-discord', {
   on: 'youtube',
@@ -133,12 +131,11 @@ Automate Friday's DSL stays as small as it can while covering real workflows. Th
 
 ```
 The base primitive:
-  auto.skill       — declare a unit of work (declarative baseline; no code required)
+  auto.skill       — declare a unit of work; can list `requires: [...]` for composition
 
 Things that orbit skills:
-  auto.agent       — advertise that you can fulfill certain skills
+  auto.agent       — capability provider: `provides: [...]` which skills it can do
   auto.role        — attest authority that gates approval of skill dispatches
-  auto.toolbox     — bundle tools into a named capability set that skills can require
   auto.engine      — react to the world and dispatch skills
   auto.workflow    — compose skills into a pipeline, triggered by a sensor
 
@@ -149,9 +146,11 @@ Control flow between skill dispatches:
   auto.switch      — conditional branch based on projected state
 ```
 
+The vocabulary mirrors POSIX package semantics: skills declare what they `require`, agents declare what they `provide`, and the runtime matches provider to requirement. How an agent concretely does the work (a webhook, an MCP server, a human clicking a button) is the agent's internal business — not modeled by the DSL.
+
 Queues, retries, approvals, audit, replay, multi-party coordination, and progressive automation all fall out of how these primitives compose over a shared fact log — they aren't separate subsystems. See [`docs/key-ideas.md`](docs/key-ideas.md) for how each primitive earns its place.
 
-The DSL is actively evolving. New primitives land when a real workflow we care about needs them; we don't add surface speculatively. If you hit something awkward in your workflow, that's likely a framework bug, not a usage issue — open an issue.
+The DSL is actively evolving. New primitives land when a real workflow we care about needs them; we don't add surface speculatively. Governance over shared resources like MCP servers and secrets — what was previously called "toolbox" — is explicitly **not** part of the core framework; see [`docs/ROADMAP.md`](docs/ROADMAP.md) for the plugin model that will live alongside the core.
 
 ## Status
 

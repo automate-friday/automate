@@ -8,11 +8,10 @@
 // agents (Haiku via `claude -p`) collaborating on a workflow through a
 // shared fact log.
 //
-// The seven primitives exercised:
-//   auto.skill      — declarative unit of work (with optional approval/toolbox gates)
+// The primitives exercised:
+//   auto.skill      — declarative unit of work (optionally approval-gated)
 //   auto.role       — attestation that a subject holds a role
-//   auto.toolbox    — named capability bundle (governance)
-//   auto.agent      — advertised capability, with a fulfillment function
+//   auto.agent      — capability provider: advertises which skills it provides
 //   auto.engine     — reactive policy that observes the log and dispatches
 //   auto.workflow   — sensor-triggered composition of skills
 //   auto.sequential — chain steps; later steps see earlier outputs
@@ -53,13 +52,12 @@ function subscribe(cb: (f: Fact) => void) { factSubscribers.push(cb); }
 const registered = {
   skills:    new Map<string, any>(),
   agents:    new Map<string, any>(),
-  toolboxes: new Map<string, any>(),
   workflows: new Map<string, any>(),
   engines:   new Map<string, any>(),
 };
 
 const auto = {
-  skill(id: string, spec: { description?: string; requires_approval?: string; requires_toolbox?: string } = {}) {
+  skill(id: string, spec: { description?: string; requires_approval?: string; requires?: string[] } = {}) {
     registered.skills.set(id, { id, ...spec });
     append("system", { kind: "SkillRegistered", skillId: id, ...spec });
     return { _kind: "skill" as const, id, ...spec };
@@ -67,13 +65,9 @@ const auto = {
   role(subject: string, role: string) {
     append("system", { kind: "RoleAttested", subject, role });
   },
-  toolbox(id: string, spec: { tools: string[] }) {
-    registered.toolboxes.set(id, { id, ...spec });
-    append("system", { kind: "ToolboxRegistered", toolboxId: id, tools: spec.tools });
-  },
-  agent(id: string, spec: { kind: "human" | "ai" | "script"; fulfills: string[]; toolbox?: string; run: (payload: any) => Promise<any> }) {
+  agent(id: string, spec: { kind: "human" | "ai" | "script"; provides: string[]; run: (payload: any) => Promise<any> }) {
     registered.agents.set(id, { id, ...spec });
-    append(id, { kind: "AgentOffered", agentId: id, agentKind: spec.kind, skills: spec.fulfills, toolbox: spec.toolbox });
+    append(id, { kind: "AgentOffered", agentId: id, agentKind: spec.kind, skills: spec.provides });
   },
   engine(id: string, spec: { watches: string; run: (fact: Fact) => void | Promise<void> }) {
     registered.engines.set(id, { id, ...spec });
@@ -135,8 +129,7 @@ auto.engine("dispatcher", {
 
     const rank: Record<string, number> = { script: 3, ai: 2, human: 1 };
     const eligible = [...registered.agents.values()]
-      .filter(a => a.fulfills.includes(proposed.payload.skillId))
-      .filter(a => !skill?.requires_toolbox || a.toolbox === skill.requires_toolbox)
+      .filter(a => a.provides.includes(proposed.payload.skillId))
       .sort((a, b) => rank[b.kind] - rank[a.kind]);
 
     if (eligible.length === 0) {
@@ -174,31 +167,25 @@ async function callHaiku(prompt: string): Promise<string> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 5. Scenario — YouTube → Discord with governance toolbox + approval gate
+// 5. Scenario — YouTube → Discord with approval gate
 // ═══════════════════════════════════════════════════════════════════════════
 
-// roles
+// roles — who holds authority over what
 auto.role("jacob-laptop", "owner");
 
-// toolboxes — named capability bundles
-auto.toolbox("content-tools", { tools: ["fetch-transcript", "call-llm-summarize", "post-discord-webhook"] });
-
-// skills
+// skills — abstract capabilities that describe work to be done
 auto.skill("summarize-video", {
   description: "Generate a concise summary of a YouTube video",
-  requires_toolbox: "content-tools",
 });
 auto.skill("post-to-discord", {
   description: "Post a message to a Discord channel",
-  requires_toolbox: "content-tools",
   requires_approval: "owner", // progressive automation: gated until trust graduates
 });
 
-// agents — each carries a toolbox and a fulfillment function
+// agents — each provides one or more skills. HOW they fulfill is internal.
 auto.agent("claude-summarizer", {
   kind: "ai",
-  fulfills: ["summarize-video"],
-  toolbox: "content-tools",
+  provides: ["summarize-video"],
   run: async (payload) => {
     const prompt = `You are writing a one-sentence teaser for a new video given ONLY its title. Do not ask for more info. Infer a plausible angle from the title and write an engaging single sentence. Title: "${payload.title}". Return ONLY the sentence.`;
     const summary = await callHaiku(prompt);
@@ -208,8 +195,7 @@ auto.agent("claude-summarizer", {
 
 auto.agent("discord-poster", {
   kind: "script",
-  fulfills: ["post-to-discord"],
-  toolbox: "content-tools",
+  provides: ["post-to-discord"],
   run: async (payload) => {
     // toy: would POST to Discord webhook in production
     console.log(`\n    📨 [Discord] #${payload.channel}: ${payload.content}\n`);
@@ -253,7 +239,7 @@ auto.engine("youtube-to-discord-orchestrator", {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const EMOJI: Record<string, string> = {
-  SkillRegistered: "📘", ToolboxRegistered: "🧰", RoleAttested: "📜",
+  SkillRegistered: "📘", RoleAttested: "📜",
   AgentOffered: "🤝", SensorEmitted: "🎥", DispatchProposed: "📮",
   DispatchApproved: "✅", DispatchClaimed: "🙋", DispatchConfirmed: "🟢",
   DispatchBlocked: "🔒",
@@ -265,7 +251,6 @@ subscribe((fact) => {
                  fact.payload.dispatchId ? `id=${fact.payload.dispatchId}` :
                  fact.payload.sensorId ? `sensor=${fact.payload.sensorId}` :
                  fact.payload.role ? `role=${fact.payload.role}` :
-                 fact.payload.toolboxId ? `toolbox=${fact.payload.toolboxId}` :
                  fact.payload.agentId ? `agent=${fact.payload.agentId}` : "";
   console.log(`  [L${String(fact.lamport).padStart(3)}] ${fact.signer.padEnd(28)} ${emoji} ${tag.padEnd(20)} ${detail}`);
 });
@@ -276,8 +261,8 @@ subscribe((fact) => {
 
 console.log("\n── Automate Friday DSL toy: YouTube → Discord ──\n");
 console.log("Scenario: a video is published. The summarize-video skill runs (AI, no");
-console.log("approval). post-to-discord requires owner approval (progressive automation");
-console.log("gate). Both skills require the content-tools toolbox (governance).\n");
+console.log("approval). post-to-discord requires owner approval — progressive");
+console.log("automation gate that would relax once the discord-poster has a track record.\n");
 
 await new Promise(r => setTimeout(r, 50)); // let bootstrap facts flush
 

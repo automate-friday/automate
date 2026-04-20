@@ -24,7 +24,7 @@ Because skills are declarative and executor-agnostic:
 
 - The same skill can be fulfilled by a human, an AI agent, or a deterministic script. The skill definition never changes; only the agent registered to fulfill it.
 - Skills travel. A skill defined in your log can be copied into another party's log and their agents can fulfill it. Skills are the portable artifact.
-- The rest of the DSL (roles, toolboxes, agents, engines, workflows, control flow) exists only to describe the relationships around skills: who can do them, who approves, what tools are authorized, what chain of skills makes a workflow.
+- The rest of the DSL (roles, agents, engines, workflows, control flow) exists only to describe the relationships around skills: who can do them, who approves, what chain of skills makes a workflow.
 
 If everything else in the DSL disappeared, you could still have a system of skills as plain markdown files that humans do manually. The rest of the framework is the machinery that lets the same skill scale from "human reads a doc and does it" to "AI handles it unattended" without the skill definition changing.
 
@@ -53,7 +53,7 @@ description: Post a message to a Discord channel.
 
 automate-friday:
   requires_approval: owner         # gate: only dispatches approved by an owner can proceed
-  requires_toolbox: content-tools  # gate: only agents holding content-tools can fulfill
+  requires: [validate-channel]     # sub-capabilities this skill composes with
   provides:                        # what this skill produces (for workflow composition)
     - messageId: string
     - postedAt: iso8601
@@ -68,7 +68,7 @@ The earlier design draft proposed a separate `skill.ts` file alongside `SKILL.md
 
 - One file, one format, always.
 - Vanilla readers (Claude Code, Cursor, etc.) see a valid SKILL.md — name, description, process — and run it.
-- Automate Friday readers see the `automate-friday` block additionally and wire in approval gates, toolbox checks, workflow composition.
+- Automate Friday readers see the `automate-friday` block additionally and wire in approval gates, composition dependencies, and workflow orchestration.
 - No "this tool supports Automate Friday skills, this one doesn't." Every tool gets a working skill; some get more.
 
 ### How a "full skill" plugs into the system
@@ -101,7 +101,7 @@ These are the primitives the DSL exposes today. Each compiles to fact-log operat
 auto.skill(id, {
   description,
   requires_approval?: role,        // progressive automation gate
-  requires_toolbox?: toolboxId,    // governance capability gate
+  requires?: skillId[],            // sub-capabilities this skill composes with
 })
 ```
 
@@ -112,16 +112,11 @@ A skill just names and describes work. Nothing else is required. Everything belo
 ```typescript
 auto.agent(id, {
   kind: 'human' | 'ai' | 'script',  // selection prefers script > ai > human
-  fulfills: skillId[],              // which skills I can do
-  toolbox?: toolboxId,              // what I'm authorized for
-  run: (payload) => Promise<any>,   // fulfillment function
+  provides: skillId[],              // which skills I can do — pairs with skill.requires
+  run: (payload) => Promise<any>,   // how I do them (internal business)
 })
 
 auto.role(subject, role)            // attest authority that gates skill approval
-
-auto.toolbox(id, {
-  tools: string[],                  // named capability set skills can require
-})
 
 auto.engine(id, {
   watches: factKind,                // reactive policy that dispatches skills
@@ -133,6 +128,8 @@ auto.workflow(id, {
   steps,                            // composition of skills
 })
 ```
+
+**Vocabulary note.** Skills declare what they `require`; agents declare what they `provide`. This mirrors POSIX package semantics and npm dependencies. The runtime matches provider to requirement by skill name. How an agent concretely fulfills — a webhook, an MCP tool call, a human clicking a button, a composed sub-skill — is its internal business, deliberately not modeled by the DSL.
 
 ### Control flow between steps
 
@@ -147,39 +144,25 @@ auto.switch(value, { case1: body1, ... })   // conditional branch
 
 | Primitive | Serves progressive automation | Serves decentralized collaboration |
 |---|---|---|
-| `auto.skill` | Declarative unit; same id across fulfillers | Shared contract across parties |
+| `auto.skill` | Declarative unit; same id across providers | Shared contract across parties |
 | `auto.role` | Defines WHO can approve | Cross-party trust via attestations |
-| `auto.toolbox` | Scopes what a fulfiller can touch | Capability-based authorization across parties |
 | `auto.agent` | The graduating entity | Self-advertised capability in the log |
 | `auto.engine` | Reactive policies (including trust-graduation rules) | Runs on any node; reacts via log subscription |
 | `auto.workflow` | Declarative composition | Shared workflow definition anyone can project |
-| `auto.sequential` / `parallel` / `for` / `switch` | Control flow between steps | Deterministic composition across fulfillers |
+| `auto.sequential` / `parallel` / `for` / `switch` | Control flow between steps | Deterministic composition across providers |
 
 ## What stays out (for now)
 
 Dropped from earlier iterations, or deferred until a real workflow demands them:
 
-- `auto.checkpoint`, `auto.transaction` — persistence concerns belong in the runtime, not the DSL
-- `auto.module` — filesystem resolution; the DSL should be declarative, not filesystem-coupled
-- 12 relationship words from the earlier `auto.system` DSL (`watches`, `gates`, `escalates`, `supervises`, `overrides`, `spawns`, `owns`, `monitors`, `publishes`, `depends_on`, `signals`, `context`) — most of these collapse into reducer rules in the fact log
-- Chassis supervision tree (Erlang/OTP-style) — overkill for reactive loops; replaced by a single log subscription
-- Four-primitive vision (Skills / Agents / Tools / Tasks) — Tools are subsumed by Toolboxes; Tasks are subsumed by sensors + DispatchProposed facts
+- **`auto.toolbox` / governed MCP-and-secret access** — moved out of core. This is a governance middleware concept (RBAC over MCP servers, secret access logging) that plugs in via fact schemas rather than being baked into the framework. See [`ROADMAP.md`](ROADMAP.md).
+- `auto.checkpoint`, `auto.transaction` — persistence concerns belong in the runtime, not the DSL.
+- `auto.module` — filesystem resolution; the DSL should be declarative, not filesystem-coupled.
+- 12 relationship words from the earlier `auto.system` DSL (`watches`, `gates`, `escalates`, `supervises`, `overrides`, `spawns`, `owns`, `monitors`, `publishes`, `depends_on`, `signals`, `context`) — most collapse into reducer rules in the fact log.
+- Chassis supervision tree (Erlang/OTP-style) — overkill for reactive loops; replaced by a single log subscription.
+- Four-primitive vision (Skills / Agents / Tools / Tasks) — Tools live at the agent-implementation layer (SKILL.md `allowed-tools`), not the DSL. Tasks are subsumed by sensors + `DispatchProposed` facts.
 
 These can come back if we hit a workflow that genuinely needs them. The DSL is an iterative artifact, not a frozen spec.
-
-## Governance toolboxes — a new concept
-
-A **toolbox** is a named bundle of tools or skills a party is authorized to use. Think of it as capability-based security expressed through grouping.
-
-```typescript
-auto.toolbox('content-tools', { tools: ['fetch-transcript', 'call-llm', 'post-webhook'] })
-
-auto.skill('post-to-discord', { requires_toolbox: 'content-tools' })
-
-auto.agent('discord-poster', { toolbox: 'content-tools', /* ... */ })
-```
-
-The reducer rejects claims from agents whose toolbox doesn't satisfy the skill's requirement. This is distinct from RBAC roles (which gate approval) — toolboxes gate fulfillment. Both layer naturally over the fact log.
 
 ## How the DSL compiles to the protocol
 
@@ -189,7 +172,6 @@ Every DSL surface reduces to facts in the log:
 |---|---|
 | `auto.skill(id, spec)` | `SkillRegistered` |
 | `auto.role(subject, role)` | `RoleAttested` |
-| `auto.toolbox(id, spec)` | `ToolboxRegistered` |
 | `auto.agent(id, spec)` | `AgentOffered` |
 | `auto.engine(id, spec)` | Local policy subscribing to log |
 | `auto.workflow(id, spec)` | Compiled into an orchestrator engine |
@@ -201,9 +183,8 @@ The DSL is porcelain. The fact log is plumbing. See the `automate-friday/protoco
 
 See `examples/youtube-to-discord.ts` for a runnable 200-LOC example exercising the core primitives with live Haiku-backed agents via `claude -p`. It demonstrates:
 
-- A skill with a toolbox gate (`summarize-video` requires `content-tools`)
 - A skill with an approval gate (`post-to-discord` requires `owner` role)
-- Multi-kind agents (an AI summarizer and a script Discord-poster)
+- Multi-kind agents (an AI summarizer and a script Discord-poster) providing different skills
 - An RBAC approver engine that projects attestations and records approvals
 - A workflow orchestrator engine that chains dispatches based on `DispatchConfirmed` facts
 - Live fact-log output showing the entire collaboration
