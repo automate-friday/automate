@@ -4,7 +4,7 @@
 
 **License:** FSL-1.1-Apache-2.0 (Functional Source License, converts to Apache 2.0 on 2028-04-19)
 **Author:** Jacob Haugen
-**Status:** Scaffolding. DSL and runtime implementations not yet built.
+**Status:** Early scaffolding with one working example. See [`docs/key-ideas.md`](docs/key-ideas.md) for the seven-primitive DSL vocabulary (ruthlessly cut to serve declarative progressive automation + decentralized collaboration). See [`examples/youtube-to-discord.ts`](examples/youtube-to-discord.ts) for a runnable ~200-LOC example exercising the full DSL with live Haiku agents via `claude -p`.
 
 ---
 
