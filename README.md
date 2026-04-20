@@ -15,7 +15,11 @@ You end up with two bad options: don't use AI, or hand it the keys.
 
 ## The idea
 
-**The same skill, done by different fulfillers as trust grows.**
+**Skills are the base primitive.** A skill is a declarative description of work that needs to happen — written in plain language with structured metadata, no code required. A skill does not know who will do it, when, or how. It just names the work and describes it.
+
+Everything else in the framework exists in service of skills: agents fulfill them, roles gate their approval, toolboxes scope what's authorized, engines dispatch them, workflows compose them, control flow orders them.
+
+Because skills are declarative and executor-agnostic, the same skill can be done by different fulfillers as trust grows:
 
 ```
 Skill: "reply to customer support ticket"
@@ -77,21 +81,24 @@ No servers to configure. No webhook plumbing. No bespoke integration code.
 
 ## The DSL
 
-Automate Friday's DSL stays as small as it can while covering real workflows. The current primitives:
+Automate Friday's DSL stays as small as it can while covering real workflows. The base primitive is the skill — everything else exists to describe how skills get done.
 
 ```
-auto.skill       — declare a unit of work, with optional approval/capability gates
-auto.role        — attest that someone holds authority
-auto.toolbox     — bundle tools into a named capability set
-auto.agent       — advertise that you can fulfill certain skills
-auto.engine      — react to facts and dispatch work
-auto.workflow    — compose skills, triggered by a sensor
+The base primitive:
+  auto.skill       — declare a unit of work (declarative baseline; no code required)
 
-Control flow between steps:
-auto.sequential  — chain steps in order; later steps see earlier outputs
-auto.parallel    — fan out; all steps run concurrently
-auto.for         — iterate over a collection; one dispatch per item
-auto.switch      — conditional branch based on projected state
+Things that orbit skills:
+  auto.agent       — advertise that you can fulfill certain skills
+  auto.role        — attest authority that gates approval of skill dispatches
+  auto.toolbox     — bundle tools into a named capability set that skills can require
+  auto.engine      — react to the world and dispatch skills
+  auto.workflow    — compose skills into a pipeline, triggered by a sensor
+
+Control flow between skill dispatches:
+  auto.sequential  — chain in order; later steps see earlier outputs
+  auto.parallel    — fan out; all steps run concurrently
+  auto.for         — iterate over a collection; one dispatch per item
+  auto.switch      — conditional branch based on projected state
 ```
 
 Queues, retries, approvals, audit, replay, multi-party coordination, and progressive automation all fall out of how these primitives compose over a shared fact log — they aren't separate subsystems. See [`docs/key-ideas.md`](docs/key-ideas.md) for how each primitive earns its place.

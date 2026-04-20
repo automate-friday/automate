@@ -16,11 +16,25 @@ Everything else in the framework is secondary to, and in service of, these two.
 
 ---
 
+## Skills are the base primitive
+
+Everything in the DSL orbits the skill. **A skill is a declarative description of a unit of work to be done** — no more, no less. It names the work, describes it, and optionally declares who can approve its dispatch and what capabilities are required to fulfill it. It does not know who will do the work, when, or how.
+
+Because skills are declarative and executor-agnostic:
+
+- The same skill can be fulfilled by a human, an AI agent, or a deterministic script. The skill definition never changes; only the agent registered to fulfill it.
+- Skills travel. A skill defined in your log can be copied into another party's log and their agents can fulfill it. Skills are the portable artifact.
+- The rest of the DSL (roles, toolboxes, agents, engines, workflows, control flow) exists only to describe the relationships around skills: who can do them, who approves, what tools are authorized, what chain of skills makes a workflow.
+
+If everything else in the DSL disappeared, you could still have a system of skills as plain markdown files that humans do manually. The rest of the framework is the machinery that lets the same skill scale from "human reads a doc and does it" to "AI handles it unattended" without the skill definition changing.
+
+---
+
 ## The current DSL
 
 These are the primitives the DSL exposes today. Each compiles to fact-log operations and serves one or both core values. The DSL will grow — new primitives land when a real workflow needs them, not speculatively.
 
-### Declarations
+### The base primitive
 
 ```typescript
 auto.skill(id, {
@@ -28,28 +42,34 @@ auto.skill(id, {
   requires_approval?: role,        // progressive automation gate
   requires_toolbox?: toolboxId,    // governance capability gate
 })
+```
 
-auto.role(subject, role)            // attest a role
+A skill just names and describes work. Nothing else is required. Everything below is an orbital concept that describes how skills get done.
 
-auto.toolbox(id, {
-  tools: string[],                  // named capability bundle
-})
+### Things that orbit skills
 
+```typescript
 auto.agent(id, {
   kind: 'human' | 'ai' | 'script',  // selection prefers script > ai > human
-  fulfills: skillId[],
-  toolbox?: toolboxId,              // what this agent is authorized for
+  fulfills: skillId[],              // which skills I can do
+  toolbox?: toolboxId,              // what I'm authorized for
   run: (payload) => Promise<any>,   // fulfillment function
 })
 
+auto.role(subject, role)            // attest authority that gates skill approval
+
+auto.toolbox(id, {
+  tools: string[],                  // named capability set skills can require
+})
+
 auto.engine(id, {
-  watches: factKind,                // reactive policy
+  watches: factKind,                // reactive policy that dispatches skills
   run: (fact) => void | Promise<void>,
 })
 
 auto.workflow(id, {
   on: sensorId,                     // trigger
-  steps,                            // composition (see control flow below)
+  steps,                            // composition of skills
 })
 ```
 
