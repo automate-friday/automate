@@ -79,75 +79,144 @@ function forge(signer: string, payload: any): Fact {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 2. THE REDUCER — the framework's unique value. Every rule visible.
+// 2. THE REDUCER — rules declared in AER form (Args / Errors / Requirements).
+//    Each rule is self-documenting data: readable without the check function.
 // ═══════════════════════════════════════════════════════════════════════════
 
-function reducerCheck(f: Fact): { ok: true } | { ok: false; reason: string } {
-  // Rule 1: Signature must verify against the claimed signer's public key.
-  if (!verifySignature(f)) return { ok: false, reason: "bad signature" };
+type Rule = {
+  name: string;
+  args: string;                            // fact kind this rule applies to (or "*")
+  requirements: readonly string[];         // preconditions that must hold
+  errors: readonly string[];               // tagged error codes this rule can emit
+  check: (f: Fact) => string | null;       // returns error code on failure, null on ok
+};
 
-  const p = f.payload;
+const findProposed = (dispatchId: string) =>
+  log.find(x => x.payload.kind === "DispatchProposed" && x.payload.dispatchId === dispatchId && !x.rejectedReason);
+const findClaim = (dispatchId: string) =>
+  log.find(x => x.payload.kind === "DispatchClaimed" && x.payload.dispatchId === dispatchId && !x.rejectedReason);
+const findUpload = (dispatchId: string, hash: string) =>
+  log.find(x => x.payload.kind === "ArtifactUploaded" && x.payload.dispatchId === dispatchId && x.payload.hash === hash && !x.rejectedReason);
+const findAccepted = (dispatchId: string) =>
+  log.find(x => x.payload.kind === "ProofAccepted" && x.payload.dispatchId === dispatchId && !x.rejectedReason);
+const countValidations = (dispatchId: string, type: string) =>
+  log.filter(x => x.payload.kind === "ArtifactValidated" && x.payload.dispatchId === dispatchId && x.payload.artifactType === type && x.payload.verdict === "accepted" && !x.rejectedReason).length;
 
-  // Rule 2: Claims must come from agents that provide the skill.
-  if (p.kind === "DispatchClaimed") {
-    const proposed = log.find(x => x.payload.kind === "DispatchProposed" && x.payload.dispatchId === p.dispatchId && !x.rejectedReason);
+const signatureValid: Rule = {
+  name: "signature-valid",
+  args: "*",
+  requirements: [
+    "signer has a registered public key",
+    "signature matches the expected signing of (signer, payload)",
+  ],
+  errors: ["bad-signature"],
+  check: (f) => verifySignature(f) ? null : "bad-signature",
+};
+
+const claimByProvider: Rule = {
+  name: "claim-by-provider",
+  args: "DispatchClaimed",
+  requirements: [
+    "a DispatchProposed with matching dispatchId exists",
+    "byAgent is a registered agent",
+    "agent provides the proposed skill",
+    "signer equals byAgent (claims are self-signed)",
+  ],
+  errors: ["no-proposal", "unknown-agent", "agent-does-not-provide-skill", "claim-not-self-signed"],
+  check: (f) => {
+    const p = f.payload;
+    const proposed = findProposed(p.dispatchId);
+    if (!proposed) return "no-proposal";
     const agent = agents.get(p.byAgent);
-    if (!agent) return { ok: false, reason: "unknown agent" };
-    if (!proposed) return { ok: false, reason: "no proposal" };
-    if (!agent.provides.includes(proposed.payload.skillId)) return { ok: false, reason: "agent does not provide this skill" };
-    if (f.signer !== p.byAgent) return { ok: false, reason: "claim must be self-signed" };
-  }
+    if (!agent) return "unknown-agent";
+    if (!agent.provides.includes(proposed.payload.skillId)) return "agent-does-not-provide-skill";
+    if (f.signer !== p.byAgent) return "claim-not-self-signed";
+    return null;
+  },
+};
 
-  // Rule 3: Artifacts can only be uploaded by the agent that claimed the dispatch.
-  if (p.kind === "ArtifactUploaded") {
-    const claim = log.find(x => x.payload.kind === "DispatchClaimed" && x.payload.dispatchId === p.dispatchId && !x.rejectedReason);
-    if (!claim) return { ok: false, reason: "no claim for this dispatch" };
-    if (f.signer !== claim.payload.byAgent) return { ok: false, reason: "only the claimer may upload artifacts" };
-  }
+const artifactFromClaimer: Rule = {
+  name: "artifact-from-claimer",
+  args: "ArtifactUploaded",
+  requirements: [
+    "a DispatchClaimed exists for this dispatch",
+    "signer is the claimer",
+  ],
+  errors: ["no-claim", "signer-is-not-claimer"],
+  check: (f) => {
+    const claim = findClaim(f.payload.dispatchId);
+    if (!claim) return "no-claim";
+    if (f.signer !== claim.payload.byAgent) return "signer-is-not-claimer";
+    return null;
+  },
+};
 
-  // Rule 4: Validations must reference a real uploaded artifact (hash matches).
-  if (p.kind === "ArtifactValidated") {
-    const upload = log.find(x => x.payload.kind === "ArtifactUploaded" && x.payload.dispatchId === p.dispatchId && x.payload.hash === p.artifactHash && !x.rejectedReason);
-    if (!upload) return { ok: false, reason: "artifact hash does not match any upload" };
-    // Rule 4b: Validator must hold the validator role declared by the skill.
-    const proposed = log.find(x => x.payload.kind === "DispatchProposed" && x.payload.dispatchId === p.dispatchId && !x.rejectedReason);
-    const skill = skills.get(proposed?.payload.skillId);
+const validationReferencesRealArtifact: Rule = {
+  name: "validation-references-real-artifact",
+  args: "ArtifactValidated",
+  requirements: [
+    "an ArtifactUploaded with matching hash and dispatchId exists",
+    "signer holds the validator_role declared by the skill for that artifact type",
+  ],
+  errors: ["artifact-not-found", "validator-lacks-role"],
+  check: (f) => {
+    const p = f.payload;
+    const upload = findUpload(p.dispatchId, p.artifactHash);
+    if (!upload) return "artifact-not-found";
+    const skill = skills.get(findProposed(p.dispatchId)?.payload.skillId ?? "");
     const req = skill?.requires_proof?.[upload.payload.artifactType];
-    if (req?.validator_role && !hasRole(f.signer, req.validator_role)) {
-      return { ok: false, reason: `validator lacks role ${req.validator_role}` };
-    }
-  }
+    if (req?.validator_role && !hasRole(f.signer, req.validator_role)) return "validator-lacks-role";
+    return null;
+  },
+};
 
-  // Rule 5: ProofAccepted must come from an agent holding the accepts_by role.
-  if (p.kind === "ProofAccepted") {
-    const proposed = log.find(x => x.payload.kind === "DispatchProposed" && x.payload.dispatchId === p.dispatchId && !x.rejectedReason);
-    const skill = skills.get(proposed?.payload.skillId);
-    if (skill?.accepts_by && !hasRole(f.signer, skill.accepts_by)) {
-      return { ok: false, reason: `acceptor lacks role ${skill.accepts_by}` };
-    }
-    // Rule 5b: All required proof types must have at least `count` valid validations.
+const proofAcceptanceValid: Rule = {
+  name: "proof-acceptance-valid",
+  args: "ProofAccepted",
+  requirements: [
+    "signer holds the accepts_by role declared by the skill",
+    "every required proof type has at least `count` accepted validations",
+  ],
+  errors: ["acceptor-lacks-role", "insufficient-validations"],
+  check: (f) => {
+    const skill = skills.get(findProposed(f.payload.dispatchId)?.payload.skillId ?? "");
+    if (skill?.accepts_by && !hasRole(f.signer, skill.accepts_by)) return "acceptor-lacks-role";
     for (const [type, req] of Object.entries(skill?.requires_proof ?? {})) {
-      const count = log.filter(x =>
-        x.payload.kind === "ArtifactValidated"
-        && x.payload.dispatchId === p.dispatchId
-        && x.payload.artifactType === type
-        && x.payload.verdict === "accepted"
-        && !x.rejectedReason
-      ).length;
-      if (count < ((req as any).count ?? 1)) return { ok: false, reason: `proof '${type}' needs ${(req as any).count ?? 1} validations, has ${count}` };
+      if (countValidations(f.payload.dispatchId, type) < ((req as any).count ?? 1)) return "insufficient-validations";
     }
-  }
+    return null;
+  },
+};
 
-  // Rule 6: DispatchConfirmed is only valid if ProofAccepted exists for skills requiring proof.
-  if (p.kind === "DispatchConfirmed") {
-    const proposed = log.find(x => x.payload.kind === "DispatchProposed" && x.payload.dispatchId === p.dispatchId && !x.rejectedReason);
-    const skill = skills.get(proposed?.payload.skillId);
-    if (skill?.requires_proof) {
-      const accepted = log.find(x => x.payload.kind === "ProofAccepted" && x.payload.dispatchId === p.dispatchId && !x.rejectedReason);
-      if (!accepted) return { ok: false, reason: "proof not yet accepted" };
-    }
-  }
+const confirmRequiresAcceptedProof: Rule = {
+  name: "confirm-requires-accepted-proof",
+  args: "DispatchConfirmed",
+  requirements: [
+    "if the skill declares requires_proof, a matching ProofAccepted must exist",
+  ],
+  errors: ["proof-not-accepted"],
+  check: (f) => {
+    const skill = skills.get(findProposed(f.payload.dispatchId)?.payload.skillId ?? "");
+    if (skill?.requires_proof && !findAccepted(f.payload.dispatchId)) return "proof-not-accepted";
+    return null;
+  },
+};
 
+const rules: readonly Rule[] = [
+  signatureValid,
+  claimByProvider,
+  artifactFromClaimer,
+  validationReferencesRealArtifact,
+  proofAcceptanceValid,
+  confirmRequiresAcceptedProof,
+];
+
+function reducerCheck(f: Fact): { ok: true } | { ok: false; reason: string } {
+  for (const rule of rules) {
+    if (rule.args !== "*" && rule.args !== f.payload.kind) continue;
+    const err = rule.check(f);
+    if (err) return { ok: false, reason: `${rule.name}: ${err}` };
+  }
   return { ok: true };
 }
 
