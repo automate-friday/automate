@@ -291,6 +291,7 @@ append("youtube-bridge", {
   reading: { videoId: "abc123", title: "Building an agent coordination protocol", publishedAt: new Date().toISOString() },
 });
 
-await new Promise(r => setTimeout(r, 60_000));
+// Give Haiku time to respond (cold start ~10-15s; demo usually completes <25s)
+await new Promise(r => setTimeout(r, 30_000));
 
 console.log(`\n── Done. ${log.length} facts in the log. ──`);

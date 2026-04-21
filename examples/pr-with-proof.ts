@@ -42,7 +42,7 @@ function verifySignature(fact: Fact): boolean {
   return fact.signature === expected && publicKeys.has(fact.signer);
 }
 
-function appendRaw(signer: string, payload: any): Fact {
+function append(signer: string, payload: any): Fact {
   const f: Fact = {
     id: `f${log.length + 1}`,
     lamport: nextLamport++,
@@ -58,7 +58,6 @@ function appendRaw(signer: string, payload: any): Fact {
   for (const cb of subs) queueMicrotask(() => cb(f));
   return f;
 }
-const append = appendRaw;
 
 // A "forged" fact attempt: bad signature. Everything else same shape.
 function forge(signer: string, payload: any): Fact {
@@ -354,7 +353,6 @@ const EMOJI: Record<string, string> = {
   ProofAccepted: "🎖️ ",
   DispatchConfirmed: "🟢",
   DispatchBlocked: "🔒",
-  DispatchApproved: "✅",
 };
 subs.push((f) => {
   const e = EMOJI[f.payload.kind] ?? "•";
@@ -480,27 +478,6 @@ append("rogue-agent", {
   artifactType: "code",
   hash: "evil111",
   uri: "s3://evil/malware.tar.gz",
-});
-append("normally-valid-agent-id-but-without-private-key", {
-  kind: "ArtifactUploaded",
-  dispatchId,
-  artifactType: "code",
-  hash: "evil111",
-  uri: "s3://evil/malware.tar.gz",
-});
-append("valid-agent-with-right-private-key-uploading-malware", {
-  kind: "ArtifactUploaded",
-  dispatchId,
-  artifactType: "code",
-  hash: "evil111",
-  uri: "s3://evil/malware.tar.gz",
-});
-append("valid-agent-accidently-breaking-the-rules", {
-  kind: "ArtifactUploaded",
-  dispatchId,
-  artifactType: "code",
-  hash: "correct",
-  uri: "s3://something-the-claimer-will-reject.png",
 });
 
 // Attack 2: rogue tries to validate an artifact it doesn't have authority over

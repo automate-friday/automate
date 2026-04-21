@@ -153,6 +153,7 @@ for (const agent of ["owner", "claude-coder", "security-monitor", "heal-agent-v1
 
 // Pretty printer first so bootstrap is visible
 const EMOJI: Record<string, string> = {
+  SkillRegistered: "📘", AgentOffered: "🤝",
   TrustStatement: "📜", TrustRevoked: "🚫", Invariant: "🛡️ ", HealRule: "🩺",
   DispatchProposed: "📮", DispatchClaimed: "🙋", ArtifactUploaded: "🔨",
   InvariantViolation: "🚨", DispatchConfirmed: "🟢", Notification: "📣",
@@ -164,14 +165,36 @@ subs.push((f) => {
   const detail = p.subject ? `${p.subject}${p.scope ? " / " + p.scope : ""}` :
                  p.name ? `${p.name}` :
                  p.skillId ? `skill=${p.skillId}` :
+                 p.agentId ? `${p.agentId} (${p.agentKind}) provides=[${(p.skills ?? []).join(",")}]` :
                  p.offender ? `offender=${p.offender} invariant=${p.invariantName}` :
                  "";
   const reject = f.rejectedReason ? `  🔒 REJECTED — ${f.rejectedReason}` : "";
   console.log(`  [L${String(f.lamport).padStart(3)}] ${f.signer.padEnd(18)} ${e} ${tag.padEnd(20)} ${detail}${reject}`);
 });
 
+// Every example declares its skills + agents through the same DSL. Bodies may
+// then go lower-level (raw append, trust statements) — the vocabulary stays.
+const auto = {
+  skill(id: string, spec: { description?: string } = {}) {
+    append("owner", { kind: "SkillRegistered", skillId: id, ...spec });
+  },
+  agent(id: string, spec: { kind: "human" | "ai" | "script"; provides: string[] }) {
+    append(id, { kind: "AgentOffered", agentId: id, agentKind: spec.kind, skills: spec.provides });
+  },
+};
+
 console.log("\n── Self-heal: fox-in-henhouse attack + pre-declared invariants + auto-recover ──\n");
-console.log("Stage 1: Owner pre-declares trust, invariants, and heal rules.\n");
+console.log("Stage 0: declare skills + agents (DSL).\n");
+
+auto.skill("write-code",     { description: "Write code for a feature" });
+auto.skill("publish-to-git", { description: "Publish code changes to a git repository" });
+auto.skill("rotate-secret",  { description: "Rotate a compromised secret (heal action)" });
+
+auto.agent("claude-coder",    { kind: "ai",     provides: ["write-code", "publish-to-git"] });
+auto.agent("security-monitor",{ kind: "script", provides: [] });
+auto.agent("heal-agent-v1",   { kind: "script", provides: ["rotate-secret"] });
+
+console.log("\nStage 1: Owner pre-declares trust, invariants, and heal rules.\n");
 
 append("owner", { kind: "TrustStatement", subject: "claude-coder",     scope: "provide:write-code" });
 append("owner", { kind: "TrustStatement", subject: "claude-coder",     scope: "provide:publish-to-git" });

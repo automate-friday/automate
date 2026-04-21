@@ -16,7 +16,7 @@ You end up with two bad options: don't use AI, or hand it the keys.
 
 ## The idea
 
-**Skills are markdown files that describe work to be done.** A SKILL.md file is a declarative description — a human could follow it, an AI can execute it, or a deterministic script can implement it. The definition doesn't change; only who fulfills it does.
+**Skills are markdown files that describe work to be done.** A SKILL.md file is a declarative description — a human could follow it, an AI can execute it, or a deterministic script can implement it. The definition doesn't change; only who provides it does.
 
 **Agents are entities that provide skills.** Humans, AI agents, and scripts all advertise which skills they can do. When work is requested, the framework figures out who's eligible and dispatches accordingly.
 

@@ -4,7 +4,7 @@ Status of things that are in the core framework, next up, or deferred to plugin 
 
 ## Core framework — shipping and evolving
 
-The DSL primitives and runtime described in [`key-ideas.md`](key-ideas.md): skills, agents, roles, engines, workflows, control flow (`sequential`, `parallel`, `for`, `switch`). The underlying protocol is in the [companion protocol repo](https://github.com/automate-friday/protocol). See the README for current state.
+The two-primitive DSL described in [`key-ideas.md`](key-ideas.md) — `auto.skill` and `auto.agent`. Everything else (workflows, roles, engines, control flow) is a level-1 abstraction built up from those two. The underlying protocol substrate is in the [companion protocol repo](https://github.com/automate-friday/protocol).
 
 ## Near-term core work
 

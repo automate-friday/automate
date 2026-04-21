@@ -112,6 +112,7 @@ function stripeGateCanFire(refundProposal: Fact): { ok: true } | { ok: false; re
 // ═══════════════════════════════════════════════════════════════════════════
 
 const EMOJI: Record<string, string> = {
+  SkillRegistered: "📘", AgentOffered: "🤝",
   TrustStatement: "📜", SensorEmitted: "📨", DispatchProposed: "📮",
   RefundProposed: "💡", RefundApproved: "✅", StripeRefundFired: "💸",
   DispatchConfirmed: "🟢", VerificationResult: "🔍",
@@ -126,6 +127,7 @@ subs.push((f) => {
                  tag === "RefundProposed" ? `$${p.amount} customer=${p.customer} reason=${(p.reason ?? "").slice(0,30)}` :
                  p.subject ? `${p.subject} / ${p.scope}` :
                  p.sensorId ? `sensor=${p.sensorId}` :
+                 p.agentId ? `${p.agentId} (${p.agentKind}) provides=[${(p.skills ?? []).join(",")}]` :
                  p.skillId ? `skill=${p.skillId}` :
                  p.matchesProposal ? `for=${p.matchesProposal}` :
                  p.forProposal ? `for=${p.forProposal}` :
@@ -196,7 +198,29 @@ for (const agent of ["owner", "openai-refund-agent", "stripe-gate-agent", "strip
   publicKeys.set(agent, `pub-${agent}`);
 }
 
-console.log("\n── stripe-refund-gate: LLM proposes, you approve, observer fires, verifier confirms ──\n");
+// Every example declares its skills + agents through the same DSL. Bodies may
+// then go lower-level (raw append, trust statements) — the vocabulary stays.
+const auto = {
+  skill(id: string, spec: { description?: string } = {}) {
+    append("owner", { kind: "SkillRegistered", skillId: id, ...spec });
+  },
+  agent(id: string, spec: { kind: "human" | "ai" | "script"; provides: string[] }) {
+    append(id, { kind: "AgentOffered", agentId: id, agentKind: spec.kind, skills: spec.provides });
+  },
+};
+
+console.log("\n── stripe-refund-gate: LLM proposes, you approve, observer fires, verifier confirms ──");
+console.log("\nStage 0: declare skills + agents (DSL).\n");
+
+auto.skill("propose-refund",  { description: "Draft a refund proposal from customer support context (LLM-fulfillable)" });
+auto.skill("execute-refund",  { description: "Fire the Stripe refund API (deterministic observer-only)" });
+auto.skill("verify-refund",   { description: "Confirm Stripe's post-refund state matches the approval" });
+
+auto.agent("openai-refund-agent", { kind: "ai",     provides: ["propose-refund"] });
+auto.agent("stripe-gate-agent",   { kind: "script", provides: ["execute-refund"] });
+auto.agent("stripe-verifier",     { kind: "script", provides: ["verify-refund"] });
+
+console.log("\nStage 1: owner issues trust statements.\n");
 
 append("owner", { kind: "TrustStatement", subject: "openai-refund-agent", scope: "provide:propose-refund" });
 append("owner", { kind: "TrustStatement", subject: "stripe-gate-agent",   scope: "provide:execute-refund" });
