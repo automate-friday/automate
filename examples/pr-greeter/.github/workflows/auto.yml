@@ -1,0 +1,35 @@
+# This workflow is the git adapter. It's what makes the engine lifecycle
+# actually run. Drop this file (and the .auto/ folder + scripts/) into any
+# repo and your declared engines start firing on PR events.
+name: auto
+
+on:
+  pull_request:
+    types: [opened]
+
+# Default read permissions + explicit bumps for what the runner needs.
+permissions:
+  contents: write       # commit facts back to .auto/facts/
+  pull-requests: write  # post PR comments
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: install js-yaml
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+      - name: run auto-runner
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: node scripts/auto-runner.mjs
