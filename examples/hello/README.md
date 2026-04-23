@@ -1,41 +1,68 @@
-# hello — the smallest fact log
+# hello — Chapter 1
 
-The minimum composition of the three primitives.
+**One agent writing to a fact log with a skill.**
 
-- **Skill** — `.auto/skills/heartbeat/SKILL.md` describes the work in plain
-  markdown. That's it.
-- **Agent** — `run.ts` is a deterministic script that executes the skill.
-- **Fact log** — `.auto/facts/` is an append-only directory of JSONL files.
-  Every run adds one file.
-
-## Run it
-
-```
-bun run.ts
-```
-
-Each run appends one fact. Over time, `.auto/facts/` grows. That *is* the
-memory — no database, no runtime, no reducer.
+The smallest real instance of the framework: one skill, one agent, one log,
+and a git adapter that makes every append a commit.
 
 ## Layout
 
 ```
 examples/hello/
-├── .auto/
-│   ├── skills/heartbeat/SKILL.md
-│   └── facts/                    ← grows with every run
-└── run.ts                        ← the agent
+├── run.ts                                    ← the bun-local agent's code
+└── .auto/
+    ├── skills/heartbeat/
+    │   ├── SKILL.md                          ← natural-language instructions
+    │   └── log.jsonl                         ← the skill's own log (JSONL)
+    ├── agents/
+    │   └── bun-local.md                      ← the one agent, declared
+    └── adapters/
+        └── git-run                           ← pull → run → commit → push
 ```
 
-## What's absent and why
+## The three primitives, one each
 
-- **No engine declaration.** An engine is a declared pattern of fact kinds
-  with hooks. This demo has one fact kind and no hooks, so there's no engine
-  to declare.
-- **No input/output schemas on the skill.** They're an extension for
-  contracts at scale; overkill at one run-once script.
-- **No GitHub Action.** Not every agent lives in CI. Wiring `.auto/` to
-  GitHub is the next example, not this one.
+- **Skill** — `.auto/skills/heartbeat/SKILL.md`. Pure natural language. It
+  declares the log format (minimum default: `{id, at, by, kind, payload}`)
+  and what "running the skill" means (append one line to `log.jsonl`).
+- **Agent** — `bun-local`. A deterministic bun process whose code is in
+  `run.ts`. Declared in `.auto/agents/bun-local.md`.
+- **Fact log** — `.auto/skills/heartbeat/log.jsonl`. Owned by the skill.
+  First line is Genesis (the record of the skill being created). Every
+  subsequent line is a Ran fact appended by an agent.
 
-When an absence above stops being OK, the next example adds exactly one
-thing. Each new example should earn its additional surface area.
+## Run it (local-only)
+
+```
+cd examples/hello
+AGENT=bun-local bun run.ts
+```
+
+Appends one Ran fact to `.auto/skills/heartbeat/log.jsonl`. No commit, no push.
+
+## Run it (git-native)
+
+```
+cd examples/hello
+AGENT=bun-local ./.auto/adapters/git-run bun run.ts
+```
+
+The adapter:
+1. `git pull --rebase` to get latest.
+2. Runs the agent (which appends a fact).
+3. `git add` the log, `git commit -m "skill-run: bun-local"`, `git push`.
+4. If push was rejected by someone else's concurrent push, rebases and retries.
+
+The remote becomes the source of truth. `git log -- .auto/skills/heartbeat/log.jsonl`
+is the fact log's own history.
+
+## What's next (not in Chapter 1)
+
+- **Chapter 2** — *anyone* can run this skill. Same log, many agents (LLM,
+  human, remote script). The skill doesn't change; the `by` field records
+  who showed up.
+- **Chapter 3** — governance. The fact log gates which agents are allowed to
+  append what, via PR-based merge instead of direct push, with authority
+  levels and approvals.
+
+Each chapter adds exactly one thing to the one before.
