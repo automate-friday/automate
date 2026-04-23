@@ -1,6 +1,6 @@
 # automate-friday — tutorial
 
-A four-chapter walk through the framework's three primitives: **skill**,
+A six-chapter walk through the framework's three primitives: **skill**,
 **agent**, **fact log**. Each chapter adds exactly one thing to the one
 before. Read them in order.
 
@@ -10,6 +10,8 @@ before. Read them in order.
 | 2 | **any agent** — same skill, same log, different kinds of agents (scripts, LLMs, humans) all contribute. | heterogeneous agents |
 | 3 | **governance** — the skill declares `automate/authority: human`; lower-authority agents can only *propose*, must get approval. | PR-based merge as approval |
 | 4 | **two agents cooperating** — two remote agents count from 1 to 10 through the fact log alone; no direct communication. | coordination via shared log |
+| 5 | **reactive parameter** — the counting target lives in the log as a `TargetChanged` fact; agents react on their next tick. | runtime parameters in the log |
+| 6 | **test harness** — `reset.sh` forks a log back to Genesis; `harness.ts` replays a scenario and asserts the terminal state. | deterministic regression tests |
 
 ## The three primitives (repeated in every chapter)
 
