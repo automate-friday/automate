@@ -30,6 +30,27 @@ doesn't prefer any one of them; the log records all three equally.
   from the skill's point of view.
 - The log is the shared record. It doesn't care who wrote; it just accepts.
 
+## Extra credit — every runtime is a first-class agent
+
+See [`.auto/agents/extra-credit/`](./.auto/agents/extra-credit/README.md).
+
+The chapter's three core agents prove the point with script / LLM / human.
+The extra-credit folder shows how far it goes: 22 agent registrations
+covering local CLIs (codex, cursor-agent), humans over SSH, VPS LLMs,
+OpenClaw and Hermes gateways, Discord / Slack / Telegram bots, Convex /
+Vercel / Cloudflare / Temporal / n8n functions, React apps, Astro server
+endpoints, raw HTTP / WebSocket / WSS clients, XML forms, and Terraform
+templates that provision fleets of agents.
+
+The cost of supporting them isn't `22×` — it's **`1× (one commit bridge) +
+22× (small invocation snippets)`**. Pattern A runtimes push directly via the
+existing `git-run` adapter. Pattern B runtimes all call one shared bridge
+endpoint. Pattern C (IaC) provisions the others declaratively.
+
+Each extra-credit file is a valid `.auto/agents/*.md` registration. To
+activate one, copy it up one level into `.auto/agents/` and wire its
+invocation per the file's "Invocation" section.
+
 ## What's next
 
 - **Chapter 3** — governance. Now that many agents can write, we need a way
