@@ -2,6 +2,27 @@
 
 **Same skill, higher authority. Proposals need approval to merge.**
 
+## Picking up from Chapter 2
+
+At the end of Chapter 2 you ran the skill with your own agent and saw a new
+Ran fact appear in your local copy of `log.jsonl`. Good. That append is
+*local* — no one else has seen it yet. To share it with other agents, someone
+needs to commit and push it to the shared remote.
+
+For a low-stakes skill like `heartbeat`, your agent can just do it: pull →
+append → commit → push, straight to main. That's what `.auto/adapters/git-run`
+does in chapters 1, 2, 4, and 5. No gate, no review. If your write credentials
+say "default authority," the shared log accepts your append immediately.
+
+But **not every skill should work that way.** Imagine the skill was
+`send-customer-refund` or `rotate-production-secret`. You don't want an LLM
+agent that read a README to unilaterally push a commit into main. You want a
+gate: your agent *proposes*, a human (or a trusted peer) *approves*, and the
+log records the full review trail.
+
+Chapter 3 adds that gate as a property of the skill itself — right there in
+the frontmatter.
+
 ## The delta from Chapter 2
 
 Two things change:
