@@ -1,0 +1,5 @@
+{"id":"genesis00003","at":"2026-04-22T00:00:00.000Z","by":"jacob","kind":"Genesis","payload":{"skill":"heartbeat","description":"Record that an agent ran you. Governed — appends require human approval."}}
+{"id":"prop00000001","at":"2026-04-23T10:00:00.000Z","by":"bun-local","kind":"RanProposed","payload":{"runner":"Jacobs-MacBook-Air-5.local","proposalId":"p-2026-04-23-001"}}
+{"id":"appr00000001","at":"2026-04-23T10:05:12.000Z","by":"jacob","kind":"RanApproved","payload":{"proposalId":"p-2026-04-23-001"}}
+{"id":"ran000000001","at":"2026-04-23T10:05:15.000Z","by":"bun-local","kind":"Ran","payload":{"runner":"Jacobs-MacBook-Air-5.local","proposalId":"p-2026-04-23-001"}}
+{"id":"prop00000002","at":"2026-04-23T10:30:00.000Z","by":"claude-code-local","kind":"RanProposed","payload":{"runner":"Jacobs-MacBook-Air-5.local","proposalId":"p-2026-04-23-002"}}

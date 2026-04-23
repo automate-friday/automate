@@ -8,7 +8,7 @@ and a git adapter that makes every append a commit.
 ## Layout
 
 ```
-examples/hello/
+tutorial/chapter-01-one-agent/
 ├── run.ts                                    ← the bun-local agent's code
 └── .auto/
     ├── skills/heartbeat/
@@ -34,7 +34,7 @@ examples/hello/
 ## Run it (local-only)
 
 ```
-cd examples/hello
+cd tutorial/chapter-01-one-agent
 AGENT=bun-local bun run.ts
 ```
 
@@ -43,7 +43,7 @@ Appends one Ran fact to `.auto/skills/heartbeat/log.jsonl`. No commit, no push.
 ## Run it (git-native)
 
 ```
-cd examples/hello
+cd tutorial/chapter-01-one-agent
 AGENT=bun-local ./.auto/adapters/git-run bun run.ts
 ```
 

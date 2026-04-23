@@ -1,0 +1,41 @@
+#!/bin/sh
+# git-run — the git-native adapter for this example.
+#
+# Turns an agent run into a pull → append → commit → push cycle, so the
+# remote becomes the source of truth for the skill's log. Agents don't need
+# to know about git; they just produce a fact. The adapter publishes it.
+#
+# Usage:   AGENT=<id> ./.auto/adapters/git-run <command> [args...]
+# Example: AGENT=bun-local ./.auto/adapters/git-run bun examples/hello/run.ts
+set -e
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+# 1. Pull latest so the agent writes on top of the current shared state.
+git pull --rebase --quiet
+
+# 2. Run the agent. It's expected to append a line to a log.jsonl somewhere
+#    under .auto/skills/.
+"$@"
+
+# 3. Stage any log.jsonl changes. If the agent appended nothing, exit quietly.
+git add -- ':(glob).auto/skills/**/log.jsonl' 2>/dev/null || true
+if git diff --cached --quiet; then
+  echo "[git-run] no log changes to commit"
+  exit 0
+fi
+
+# 4. Commit + push. On rejection (someone else pushed between pull and push),
+#    rebase onto their changes and retry up to a few times.
+git commit -m "skill-run: ${AGENT:-agent}" --quiet
+for attempt in 1 2 3; do
+  if git push --quiet; then
+    echo "[git-run] pushed on attempt $attempt"
+    exit 0
+  fi
+  echo "[git-run] push rejected on attempt $attempt, rebasing"
+  git pull --rebase --quiet
+done
+echo "[git-run] push still failing after retries" >&2
+exit 1

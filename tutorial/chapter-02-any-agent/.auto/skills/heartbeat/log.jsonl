@@ -1,0 +1,4 @@
+{"id":"genesis00001","at":"2026-04-22T00:00:00.000Z","by":"jacob","kind":"Genesis","payload":{"skill":"heartbeat","description":"Record that an agent ran you. Any agent may fulfil it."}}
+{"id":"e390229278c5","at":"2026-04-23T02:01:51.486Z","by":"bun-local","kind":"Ran","payload":{"runner":"Jacobs-MacBook-Air-5.local"}}
+{"id":"744a5bf63c7b","at":"2026-04-23T02:01:51.503Z","by":"claude-code-local","kind":"Ran","payload":{"runner":"Jacobs-MacBook-Air-5.local"}}
+{"id":"188bf78999b3","at":"2026-04-23T02:01:51.537Z","by":"human-terminal","kind":"Ran","payload":{"runner":"Jacobs-MacBook-Air-5.local"}}
